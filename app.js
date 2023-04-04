@@ -5,6 +5,10 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const ejs = require('ejs');
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const FacebookStrategy = require('passport-facebook').Strategy;
+const session = require('express-session');
 const pg = require('pg');
 const db = require('knex') ({
     client: 'pg',
@@ -17,9 +21,6 @@ const db = require('knex') ({
   }
 });
 
-// console.log(process.env.SECRETE_KEY);
-
-
 
 const app = express();
 
@@ -30,10 +31,106 @@ app.use(bodyParser.urlencoded({
     extended : true
 }));
 
+app.use(session({
+    secret: 'keyboard cat and mouse',
+    resave: false,
+    saveUninitialized: false
+  }))
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 
+passport.serializeUser(function(user, cb) {
+process.nextTick(function() {
+    cb(null, { id: user.id, username: user.username, name: user.name });
+});
+});
+
+passport.deserializeUser(function(user, cb) {
+process.nextTick(function() {
+    return cb(null, user);
+});
+});
+  
+  
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID_GOOGLE,
+    clientSecret: process.env.CLIENT_SECRET_GOOGLE,
+    callbackURL: "http://localhost:3000/auth/google/secrets"
+},
+function(accessToken, refreshToken, profile, cb) {
+
+    console.log(profile);
+
+    db('users')
+    .returning('*')
+    .where('auth_id', profile.id)
+    .then(currentUser => {
+        // currentUser;
+
+        if(currentUser.length) {
+            cb(null, currentUser[0]);
+        } else {
+            db('users')
+            .insert({
+                username: profile.displayName,
+                auth_id: profile.id
+            })
+            .then(user => {
+                cb(null, user);
+            })
+            .catch(err => {
+                cb(err);
+            })
+        }
+    })
+    .catch(err => {
+        cb(err);
+    });
+
+}
+));
+
+passport.use(new FacebookStrategy({
+    clientID: process.env.FACEBOOK_APP_ID,
+    clientSecret: process.env.FACEBOOK_APP_SECRET,
+    callbackURL: "http://localhost:3000/auth/facebook/secrets"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    console.log(profile);
+
+    db('users')
+    .returning('*')
+    .where('auth_id', profile.id)
+    .then(currentUser => {
+        // currentUser;
+
+        if(currentUser.length) {
+            cb(null, currentUser[0]);
+        } else {
+            db('users')
+            .insert({
+                username: profile.displayName,
+                auth_id: profile.id
+            })
+            .then(user => {
+                cb(null, user);
+            })
+            .catch(err => {
+                cb(err);
+            })
+        }
+    })
+    .catch(err => {
+        cb(err);
+    });
+
+  }
+));
 
 
+  
 
 app.get('/', function(req, res) {
     res.render('home');
@@ -87,9 +184,31 @@ app.post('/login', function(req, res) {
     // })
 });
 
+app.get('/auth/google', 
+    passport.authenticate('google', { scope: ['profile'] })
+);
+
+app.get('/auth/google/secrets', 
+  passport.authenticate('google', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+  });
+
+
+app.get('/auth/facebook',
+  passport.authenticate('facebook'));
+
+app.get('/auth/facebook/secrets',
+  passport.authenticate('facebook', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+  });
+
 app.get('/register', function(req, res) {
     res.render('register');
-})
+});
 
 app.post('/register', function(req, res) {
     const { username, password} = req.body;
@@ -111,7 +230,12 @@ app.post('/register', function(req, res) {
 });
 
 app.get('/secrets', function(req, res) {
-    res.render('secrets');
+    if (req.isAuthenticated()) {
+        res.render('secrets');
+    } else {
+        res.redirect('/login');
+    }
+    
 })
 
 app.get('/submit', function(req, res) {

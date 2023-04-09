@@ -43,7 +43,7 @@ app.use(passport.session());
 
 passport.serializeUser(function(user, cb) {
 process.nextTick(function() {
-    cb(null, { id: user.id, username: user.username, name: user.name });
+    cb(null, { id: user.auth_id, username: user.username, name: user.name });
 });
 });
 
@@ -52,7 +52,6 @@ process.nextTick(function() {
     return cb(null, user);
 });
 });
-  
   
 passport.use(new GoogleStrategy({
     clientID: process.env.CLIENT_ID_GOOGLE,
@@ -67,7 +66,6 @@ function(accessToken, refreshToken, profile, cb) {
     .returning('*')
     .where('auth_id', profile.id)
     .then(currentUser => {
-        // currentUser;
 
         if(currentUser.length) {
             cb(null, currentUser[0]);
@@ -104,7 +102,6 @@ passport.use(new FacebookStrategy({
     .returning('*')
     .where('auth_id', profile.id)
     .then(currentUser => {
-        // currentUser;
 
         if(currentUser.length) {
             cb(null, currentUser[0]);
@@ -130,8 +127,6 @@ passport.use(new FacebookStrategy({
 ));
 
 
-  
-
 app.get('/', function(req, res) {
     res.render('home');
 });
@@ -142,46 +137,39 @@ app.get('/login', function(req, res) {
 
 app.post('/login', function(req, res) {
 
-    const { username, password } = req.body;
-
-    // bcrypt.compare(password, hash, function(err, result) {
-    //     // result == true
-    // });
+    const { email, password } = req.body;
 
     db('users')
     .returning('*')
     .where({
-        username: username
-        // password: password
+        auth_id: email
     })
     .then(user => {
 
-        bcrypt.compare(password, user[0].password)
-        .then(result => {
-            if (result) {
-                res.render('secrets');
-            } else {
-                res.status(400).json('Incorrect username or password');
-            }
-        })
-        .catch(err => {
-            res.status(400).json(err);
-        })
+        if (Object.keys(user).length != 0) {
+            bcrypt.compare(password, user[0].password)
+            .then(result => {
+                
+                console.log(result);
+                if (result) {
+                    res.redirect('/secrets');
+                } else {
+                    res.status(400).json('Incorrect email or password');
+                }
+            })
+            .catch(err => {
+                res.status(400).json(err);
+            })
+        } else {
+            console.alert('User Not Found');
+            res.redirect('/register');
+        }
+
     })
     .catch(err => {
-        res.status(400).json(err);
+        res.status(400).json('Something went wrong');
     })
 
-    // .then(response => {
-    //     if (response.length != 0) {
-    //         res.render('secrets');
-    //     } else {
-    //         res.status(400).json('Incorrect username or password');
-    //     }
-    // })
-    // .catch(err => {
-    //     res.status(400).json('Incorrect username or password');
-    // })
 });
 
 app.get('/auth/google', 
@@ -211,12 +199,12 @@ app.get('/register', function(req, res) {
 });
 
 app.post('/register', function(req, res) {
-    const { username, password} = req.body;
+    const { email, password} = req.body;
 
     bcrypt.hash(password, 10, function(err, hash) {
         db('users')
         .insert({
-            username: username,
+            auth_id: email,
             password: hash
         })
         .then(() => {
@@ -230,17 +218,40 @@ app.post('/register', function(req, res) {
 });
 
 app.get('/secrets', function(req, res) {
-    if (req.isAuthenticated()) {
-        res.render('secrets');
-    } else {
-        res.redirect('/login');
-    }
     
+
+    db('users')
+    .whereNotNull('secrets')
+    .then(secrets => {
+    
+        res.render('secrets', {secrets: secrets});
+        
+    })
+
 })
 
 app.get('/submit', function(req, res) {
     res.render('submit');
-})
+});
+
+app.post('/submit', function(req, res) {
+    const { id } = req.user;
+    const { secret } = req.body;
+
+    db('users')
+    .where({auth_id: id})
+    .update({
+        secrets: db.raw('array_append(secrets, ?)', secret)
+    })
+    .catch(err => {
+        res.status(400).json('Unable to add a secret!')
+    });
+
+    console.log(req.user);
+
+    res.redirect('/secrets');
+   
+});
 
 
 
